@@ -1,5 +1,6 @@
 #include<stdio.h>
 #include<stdlib.h>
+#include<sys/time.h>
 #include<sys/types.h>
 #include<sys/socket.h>
 #include<string.h>
@@ -14,8 +15,9 @@
 #define NS 2
 #define MAX_IP_LEN INET_ADDRSTRLEN
 
+u_int8_t flag = 0;
+
 typedef struct {
-	
 	unsigned short id; 
 	uint8_t rd : 1;
 	uint8_t tc;
@@ -27,37 +29,33 @@ typedef struct {
 	uint8_t ad;
 	uint8_t z;
 	uint8_t ra;
-	
+
 	unsigned short query_count;
 	unsigned short ans_count;
 	unsigned short auth_count;
 	unsigned short add_count;
-	
-}dns_header;
 
-typedef struct
-{
+} dns_header;
+
+typedef struct {
 	unsigned short qtype;
 	unsigned short qclass;
-}question;
+} question;
 
-typedef struct
-{
+typedef struct {
 	unsigned short type;
 	unsigned short _class;
 	unsigned int ttl;
 	unsigned short data_len;
-}r_data;
+} r_data;
 
-typedef struct
-{
+typedef struct {
 	unsigned char *name;
 	r_data *resource;
 	unsigned char *rdata;
 } res_record;
 
-typedef struct
-{
+typedef struct {
 	unsigned char *name;
 	unsigned short qtype;
 	unsigned short qclass;
@@ -91,79 +89,105 @@ unsigned char* resolve_hostname(char* hostname) {
 }
 
 dns_query get_query(char *domain){
-	dns_query query;
-	query.name = resolve_hostname(domain);
-	query.qclass = htons(1);
-	query.qtype = htons(1);
-	
+	dns_query query = {
+		.name = resolve_hostname(domain),
+		.qclass = htons(1),
+		.qtype = htons(1)
+	};
 	return query;
 }
 
-dns_header get_header(void){
-	dns_header header;
+dns_header get_header(void) {
 	srand(time(NULL));
-	header.id = (unsigned short)htons(rand());
-	header.qr = 0; //This is a query
-	header.opcode = 0; //This is a standard query
-	header.aa = 0; //Not Authoritative
-	header.tc = 0; //This message is not truncated
-	header.rd = 1; //Recursion Desired
-	header.ra = 0; //Recursion not available! hey we dont have it (lol)
-	header.z = 0;
-	header.ad = 0;
-	header.cd = 0;
-	header.rcode = 0;
-	header.query_count = htons(1); //we have only 1 question
-	header.ans_count = 0;
-	header.auth_count = 0;
-	header.add_count = 0;
-	
+	dns_header header = {
+		.id = (unsigned short)htons(rand()%UINT16_MAX),
+		.qr = 0, //This is a query
+		.opcode = 0, //This is a standard query
+		.aa = 0, //Not Authoritative
+		.tc = 0, //This message is not truncated
+		.rd = 1, //Recursion Desired
+		.ra = 0, //Recursion not available! hey we dont have it (lol)
+		.z = 0,
+		.ad = 0,
+		.cd = 0,
+		.rcode = 0,
+		.query_count = htons(1), //we have only 1 question
+		.ans_count = 0,
+		.auth_count = 0,
+		.add_count = 0
+	};
+
 	return header;
 }
 
-void send_message(char *domain, char *server){
-	
-	/* set up the sockets */
-	sockaddr_in udp_server;
-	char buffer[MAX_BUF];
-	
-	int udp_socket = socket(AF_INET, SOCK_DGRAM, 0);
-	udp_server.sin_family = AF_INET;
-	udp_server.sin_port = htons(DNS_PORT);
-	udp_server.sin_addr.s_addr = inet_addr(server);
-	
-	/* set up the header */
-	dns_header header = get_header();
-	
-	/* set up the query */
-	dns_query query = get_query(domain);
-	
-	 // Copy header into buffer
-    memcpy(buffer, &header, sizeof(dns_header));
-    
-    // Copy query into buffer after header
-    memcpy(buffer + sizeof(dns_header), &query, sizeof(dns_query));
-    
-    int buffer_size = sizeof(dns_header) + sizeof(dns_query);
-    
-    int return_status = sendto(udp_socket, buffer, buffer_size, 0, (struct sockaddr*)&udp_server, sizeof(udp_server));
-    
-	if(return_status == -1){
-		fprintf(stderr,"Could not send the message.\n");
-	}else{
-		puts("Message sent :-D");
-		printf("Response status : %d\n",return_status);
+void receive_response(int udp_socket, char *buffer, sockaddr_in *udp_server) {
+	socklen_t addr_len = sizeof(sockaddr_in);
+	struct timeval tv = {
+		.tv_sec = 2,
+		.tv_usec = 0
+	};
+	setsockopt(udp_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
+
+	int n = recvfrom(udp_socket, buffer, MAX_BUF, 0, (struct sockaddr *)udp_server, &addr_len);
+	if(n<0) {
+		return;
+	}
+	flag=1;
+	printf("Resposta do servidor DNS:\n");
+	for (int i = 0; i < n; i++) {
+		printf("%02X ", buffer[i]);
+		if ((i + 1) % 16 == 0)
+			printf("\n");
 	}
 }
 
-int main(int argc, char ** argv)
-{
-	
-	if(argc < 3){
+void send_message(char *domain, char *server) {
+	char buffer[MAX_BUF];
+	int udp_socket = socket(AF_INET, SOCK_DGRAM, 0);
+
+	/* set up the sockets */
+	sockaddr_in udp_server = {
+		.sin_family = AF_INET,
+		.sin_port = htons(DNS_PORT),
+		.sin_addr.s_addr = inet_addr(server)
+	};
+
+	/* set up the header */
+	dns_header header = get_header();
+
+	/* set up the query */
+	dns_query query = get_query(domain);
+
+	// Copy header into buffer
+	memcpy(buffer, &header, sizeof(dns_header));
+
+	// Copy query into buffer after header
+	memcpy(buffer + sizeof(dns_header), &query, sizeof(dns_query));
+
+	int buffer_size = sizeof(dns_header) + sizeof(dns_query);
+
+	int return_status = sendto(udp_socket, buffer, buffer_size, 0, (struct sockaddr*)&udp_server, sizeof(udp_server));
+
+	if(return_status == -1) {
+		fprintf(stderr,"Could not send the message.\n");
+	}else {
+		puts("Message sent :-D");
+		printf("Response status : %d\n",return_status);
+	}
+
+	for(int i=1; i<=3; i++) {
+		receive_response(udp_socket, buffer, &udp_server);
+	}
+	if (flag == 0) puts("PUTS!");
+	close(udp_socket);
+}
+
+int main(int argc, char ** argv) {
+	if(argc < 3) {
 		fprintf(stderr,"Usage : %s  <dns_server> <fdnq>\n",argv[0]);
 		exit(EXIT_FAILURE);
 	}
 	send_message(argv[1],argv[2]);
-	
+
 	return EXIT_SUCCESS;
 }
