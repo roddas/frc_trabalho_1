@@ -158,6 +158,10 @@ void send_message(char *domain, char *server) {
 	/* set up the query */
 	dns_query query = get_query(domain);
 
+	if (query.name == NULL) {
+		printf("Domínio %s nao encontrado\n", domain);
+		return;
+	}
 	// Copy header into buffer
 	memcpy(buffer, &header, sizeof(dns_header));
 
@@ -178,7 +182,7 @@ void send_message(char *domain, char *server) {
 	for(int i=1; i<=3; i++) {
 		receive_response(udp_socket, buffer, &udp_server);
 	}
-	if (flag == 0) puts("PUTS!");
+	if (flag == 0) printf("Nao foi possível coletar entrada NS para %s\n", domain);
 	close(udp_socket);
 }
 
@@ -188,6 +192,7 @@ int main(int argc, char ** argv) {
 		exit(EXIT_FAILURE);
 	}
 	send_message(argv[1],argv[2]);
+	puts("\n");
 
 	return EXIT_SUCCESS;
 }
